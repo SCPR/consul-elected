@@ -112,7 +112,7 @@ class ConsulElected
 
             @_monitoring = false
 
-            if body[0]?.Session
+            if body && body[0]?.Session
                 # there is a leader... poll again
                 debug "Leader is #{ if body[0].Session == @session then "Me" else body[0].Session }. Polling again."
                 @_monitorKey()
@@ -142,6 +142,8 @@ class ConsulElected
         @process = p:null, start:Number(new Date), stopping:false
         @process.p = cp.spawn cmd[0], cmd[1..], opts
 
+        @process.p.stderr.pipe(process.stderr)
+
         @process.p.on "error", (err) =>
             debug "Command got error: #{err}"
             @_runCommand() if !@process.stopping
@@ -157,11 +159,11 @@ class ConsulElected
 
         if @process
             @process.stopping = true
-            @process.once "exit", =>
+            @process.p.once "exit", =>
                 debug "Command is stopped."
                 @process = null
 
-            @process.kill()
+            @process.p.kill()
         else
             debug "Stop called with no process running?"
 
