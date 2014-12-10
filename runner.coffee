@@ -181,6 +181,8 @@ class ConsulElected
     terminate: (cb) ->
         @_terminating = true
 
+        @_stopCommand() if @process
+
         destroySession = =>
             if @session
                 # terminate our session
