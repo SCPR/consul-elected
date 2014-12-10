@@ -15,5 +15,8 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Eric Richardson <erichardson@scpr.org>",
-  "license": "BSD"
+  "license": "BSD",
+  "bin": {
+    "consul-elected": "./runner-cmd"
+  }
 }
