@@ -24,7 +24,13 @@ args = require("yargs")
         cwd:        "Working directory for command"
         watch:      "File to watch for restarts"
         restart:    "Restart command if watched path changes"
+        verbose:    "Turn on debugging"
+    .boolean(['restart','verbose'])
     .argv
+
+if args.verbose
+    (require "debug").enable('consul-elected')
+    debug = require("debug")("consul-elected")
 
 #----------
 
@@ -41,7 +47,8 @@ class ConsulElected
         @_monitoring    = false
         @_terminating   = false
 
-        _start = =>
+        # Set a slightly more readable title
+        @_updateTitle()
 
         if args.watch
             debug "Setting a watch on #{ args.watch } before starting up."
@@ -59,6 +66,11 @@ class ConsulElected
 
         else
             @_startUp()
+
+    #----------
+
+    _updateTitle: ->
+        process.title = "consul-elected (#{ if @process then "Running" else "Waiting" })(#{@command})"
 
     #----------
 
@@ -170,6 +182,8 @@ class ConsulElected
 
         @process.p.stderr.pipe(process.stderr)
 
+        @_updateTitle()
+
         # we want to restart when the watch triggers a change event
         @_w?.on "change", (evt,file) =>
             # send a kill, then let our normal exit code handle the restart
@@ -194,6 +208,8 @@ class ConsulElected
             @process.p.once "exit", =>
                 debug "Command is stopped."
                 @process = null
+
+                @_updateTitle()
 
             @process.p.kill()
         else
