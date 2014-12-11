@@ -17,7 +17,8 @@
     "grunt-mocha-test": "^0.12.4"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepublish": "grunt"
   },
   "author": "Eric Richardson <erichardson@scpr.org>",
   "repository": "git@github.com:SCPR/consul-elected.git",
