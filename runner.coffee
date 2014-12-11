@@ -1,5 +1,8 @@
 debug = require("debug")("consul-elected")
 
+Watch = require "watch-for-path"
+
+fs      = require "fs"
 os      = require "os"
 cp      = require "child_process"
 request = require "request"
@@ -20,6 +23,7 @@ args = require("yargs")
         command:    "Command to run when elected"
         cwd:        "Working directory for command"
         watch:      "File to watch for restarts"
+        restart:    "Restart command if watched path changes"
     .argv
 
 #----------
@@ -37,6 +41,28 @@ class ConsulElected
         @_monitoring    = false
         @_terminating   = false
 
+        _start = =>
+
+        if args.watch
+            debug "Setting a watch on #{ args.watch } before starting up."
+            new Watch args.watch, (err) =>
+                throw err if err
+
+                if args.restart
+                    # now set a normal watch on the now-existant path, so that we
+                    # can restart if it changes
+                    @_w = fs.watch args.watch, (evt,file) =>
+                        debug "Watch fired for #{file} (#{evt})"
+
+                # path now exists...
+                @_startUp()
+
+        else
+            @_startUp()
+
+    #----------
+
+    _startUp: ->
         @_createSession (err,id) =>
             if err
                 console.error "Failed to create session: #{err}"
@@ -143,6 +169,12 @@ class ConsulElected
         @process.p = cp.spawn cmd[0], cmd[1..], opts
 
         @process.p.stderr.pipe(process.stderr)
+
+        # we want to restart when the watch triggers a change event
+        @_w?.on "change", (evt,file) =>
+            # send a kill, then let our normal exit code handle the restart
+            debug "Triggering restart after watched file change."
+            @process.p.kill()
 
         @process.p.on "error", (err) =>
             debug "Command got error: #{err}"
