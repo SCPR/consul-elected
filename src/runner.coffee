@@ -259,8 +259,11 @@ class ConsulElected
 
 elected = new ConsulElected args.server, args.key, args.command
 
-process.on 'SIGINT', ->
+_handleExit = ->
     elected.terminate ->
         debug "Consul Elected exiting."
         process.exit()
+
+process.on 'SIGINT', _handleExit
+process.on 'SIGTERM', _handleExit
 

@@ -1,5 +1,5 @@
 (function() {
-  var ConsulElected, Watch, args, cp, debug, elected, fs, os, request;
+  var ConsulElected, Watch, args, cp, debug, elected, fs, os, request, _handleExit;
 
   debug = require("debug")("consul-elected");
 
@@ -286,11 +286,15 @@
 
   elected = new ConsulElected(args.server, args.key, args.command);
 
-  process.on('SIGINT', function() {
+  _handleExit = function() {
     return elected.terminate(function() {
       debug("Consul Elected exiting.");
       return process.exit();
     });
-  });
+  };
+
+  process.on('SIGINT', _handleExit);
+
+  process.on('SIGTERM', _handleExit);
 
 }).call(this);
