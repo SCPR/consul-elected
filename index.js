@@ -1,5 +1,7 @@
 (function() {
-  var ConsulElected, Watch, args, cp, debug, elected, fs, os, request, _handleExit;
+  var ConsulElected, Watch, args, cp, debug, elected, fs, os, request, _handleExit,
+    __hasProp = {}.hasOwnProperty,
+    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
 
   debug = require("debug")("consul-elected");
 
@@ -35,7 +37,9 @@
     debug = require("debug")("consul-elected");
   }
 
-  ConsulElected = (function() {
+  ConsulElected = (function(_super) {
+    __extends(ConsulElected, _super);
+
     function ConsulElected(server, key, command) {
       this.server = server;
       this.key = key;
@@ -52,15 +56,45 @@
         debug("Setting a watch on " + args.watch + " before starting up.");
         new Watch(args.watch, (function(_this) {
           return function(err) {
+            var last_m, last_restart;
             if (err) {
               throw err;
             }
+            debug("Found " + args.watch + ". Starting up.");
             if (args.restart) {
               _this._w = fs.watch(args.watch, function(evt, file) {
-                return debug("Watch fired for " + file + " (" + evt + ")");
+                debug("fs.watch fired for " + args.watch + " (" + evt + ")");
+                return _this.emit("_restart");
               });
+              last_m = null;
+              _this._wi = setInterval(function() {
+                return fs.stat(args.watch, function(err, stats) {
+                  if (err) {
+                    return false;
+                  }
+                  if (last_m) {
+                    if (Number(stats.mtime) !== last_m) {
+                      debug("Polling found change in " + args.watch + ".");
+                      _this.emit("_restart");
+                      return last_m = Number(stats.mtime);
+                    }
+                  } else {
+                    return last_m = Number(stats.mtime);
+                  }
+                });
+              }, 1000);
             }
-            return _this._startUp();
+            _this._startUp();
+            last_restart = null;
+            return _this.on("_restart", function() {
+              var cur_t;
+              cur_t = Number(new Date);
+              if ((_this.process != null) && (!last_restart || cur_t - last_restart > 1200)) {
+                last_restart = cur_t;
+                debug("Triggering restart after watched file change.");
+                return _this.process.p.kill();
+              }
+            });
           };
         })(this));
       } else {
@@ -164,7 +198,7 @@
     };
 
     ConsulElected.prototype._runCommand = function() {
-      var cmd, opts, uptime, _ref;
+      var cmd, opts, uptime;
       debug("Should start command: " + this.command);
       if (this.process) {
         this.process.p.removeAllListeners();
@@ -185,14 +219,6 @@
       this.process.p = cp.spawn(cmd[0], cmd.slice(1), opts);
       this.process.p.stderr.pipe(process.stderr);
       this._updateTitle();
-      if ((_ref = this._w) != null) {
-        _ref.on("change", (function(_this) {
-          return function(evt, file) {
-            debug("Triggering restart after watched file change.");
-            return _this.process.p.kill();
-          };
-        })(this));
-      }
       this.process.p.on("error", (function(_this) {
         return function(err) {
           debug("Command got error: " + err);
@@ -282,7 +308,7 @@
 
     return ConsulElected;
 
-  })();
+  })(require("events").EventEmitter);
 
   elected = new ConsulElected(args.server, args.key, args.command);
 

@@ -34,7 +34,7 @@ if args.verbose
 
 #----------
 
-class ConsulElected
+class ConsulElected extends require("events").EventEmitter
     constructor: (@server,@key,@command) ->
         @base_url = "http://#{@server}/v1"
 
@@ -47,6 +47,10 @@ class ConsulElected
         @_monitoring    = false
         @_terminating   = false
 
+        # create a debounced function for calling restart, so that we don't
+        # trigger multiple times in a row.  This would just be _.debounce,
+        # but bringing underscore in for one thing seemed silly
+
         # Set a slightly more readable title
         @_updateTitle()
 
@@ -55,14 +59,43 @@ class ConsulElected
             new Watch args.watch, (err) =>
                 throw err if err
 
+                debug "Found #{ args.watch }. Starting up."
+
                 if args.restart
                     # now set a normal watch on the now-existant path, so that we
                     # can restart if it changes
                     @_w = fs.watch args.watch, (evt,file) =>
-                        debug "Watch fired for #{file} (#{evt})"
+                        debug "fs.watch fired for #{args.watch} (#{evt})"
+                        @emit "_restart"
+
+                    last_m = null
+                    @_wi = setInterval =>
+                        fs.stat args.watch, (err,stats) =>
+                            if err
+                                return false
+
+                            if last_m
+                                if Number(stats.mtime) != last_m
+                                    debug "Polling found change in #{args.watch}."
+                                    @emit "_restart"
+                                    last_m = Number(stats.mtime)
+
+                            else
+                                last_m = Number(stats.mtime)
+
+                    , 1000
 
                 # path now exists...
                 @_startUp()
+
+                last_restart = null
+                @on "_restart", =>
+                    cur_t = Number(new Date)
+                    if @process? && (!last_restart || cur_t - last_restart > 1200)
+                        last_restart = cur_t
+                        # send a kill, then let our normal exit code handle the restart
+                        debug "Triggering restart after watched file change."
+                        @process.p.kill()
 
         else
             @_startUp()
@@ -183,12 +216,6 @@ class ConsulElected
         @process.p.stderr.pipe(process.stderr)
 
         @_updateTitle()
-
-        # we want to restart when the watch triggers a change event
-        @_w?.on "change", (evt,file) =>
-            # send a kill, then let our normal exit code handle the restart
-            debug "Triggering restart after watched file change."
-            @process.p.kill()
 
         @process.p.on "error", (err) =>
             debug "Command got error: #{err}"
