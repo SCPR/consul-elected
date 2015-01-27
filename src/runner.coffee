@@ -178,8 +178,15 @@ class ConsulElected extends require("events").EventEmitter
 
             return false if @_terminating
 
-            @_lastIndex = resp.headers['x-consul-index']
-            debug "Last index is now #{ @_lastIndex }"
+            if resp.headers['x-consul-index']
+                @_lastIndex = resp.headers['x-consul-index']
+                debug "Last index is now #{ @_lastIndex }"
+            else
+                # if we don't get an index, there's probably something wrong
+                # with our poll attempt. just retry that.
+                @_monitoring = false
+                @_monitorKey()
+                return false
 
             @_monitoring = false
 
@@ -187,6 +194,20 @@ class ConsulElected extends require("events").EventEmitter
                 # there is a leader... poll again
                 debug "Leader is #{ if body[0].Session == @session then "Me" else body[0].Session }. Polling again."
                 @_monitorKey()
+
+                # if we're the leader, make sure our process is still healthy
+                if body[0].Session == @session
+                    if !@process
+                        # not sure how we would arrive here...
+                        debug "I am the leader, but I have no process. How so?"
+                        @_runCommand()
+
+                    else if @process?.stopping
+                        # setting this to false will cause the process to restart
+                        # after it exits
+                        debug "Resetting process.stopping state since poll says I am the leader."
+                        @process.stopping = false
+
             else
                 # no leader... jump in
                 @_attemptKeyAcquire =>
@@ -198,6 +219,9 @@ class ConsulElected extends require("events").EventEmitter
         debug "Should start command: #{@command}"
 
         if @process
+            # FIXME: this is to remove old process information, but should we make
+            # sure it's actually dead here? or put a bullet in it?
+
             @process.p.removeAllListeners()
             @process.p = null
 

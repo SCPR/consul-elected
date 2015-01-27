@@ -175,19 +175,34 @@
         json: true
       }, (function(_this) {
         return function(err, resp, body) {
-          var _ref;
+          var _ref, _ref1;
           if (err) {
             throw err;
           }
           if (_this._terminating) {
             return false;
           }
-          _this._lastIndex = resp.headers['x-consul-index'];
-          debug("Last index is now " + _this._lastIndex);
+          if (resp.headers['x-consul-index']) {
+            _this._lastIndex = resp.headers['x-consul-index'];
+            debug("Last index is now " + _this._lastIndex);
+          } else {
+            _this._monitoring = false;
+            _this._monitorKey();
+            return false;
+          }
           _this._monitoring = false;
           if (body && ((_ref = body[0]) != null ? _ref.Session : void 0)) {
             debug("Leader is " + (body[0].Session === _this.session ? "Me" : body[0].Session) + ". Polling again.");
-            return _this._monitorKey();
+            _this._monitorKey();
+            if (body[0].Session === _this.session) {
+              if (!_this.process) {
+                debug("I am the leader, but I have no process. How so?");
+                return _this._runCommand();
+              } else if ((_ref1 = _this.process) != null ? _ref1.stopping : void 0) {
+                debug("Resetting process.stopping state since poll says I am the leader.");
+                return _this.process.stopping = false;
+              }
+            }
           } else {
             return _this._attemptKeyAcquire(function() {
               return _this._monitorKey();
