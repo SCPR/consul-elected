@@ -106,7 +106,7 @@
       return process.title = "consul-elected (" + (this.process ? "Running" : "Waiting") + ")(" + this.command + ")";
     };
 
-    ConsulElected.prototype._startUp = function() {
+    ConsulElected.prototype._startUp = function(cb) {
       return this._createSession((function(_this) {
         return function(err, id) {
           if (err) {
@@ -118,7 +118,11 @@
           if (_this._terminating) {
             return false;
           }
-          return _this._monitorKey();
+          if (cb) {
+            return cb();
+          } else {
+            return _this._monitorKey();
+          }
         };
       })(this));
     };
@@ -147,26 +151,38 @@
             _this.is_leader = true;
             debug("I am now the leader.");
             _this._runCommand();
-            return typeof cb === "function" ? cb() : void 0;
+            return cb();
           } else {
-            _this.is_leader = false;
-            debug("Did not get leader lock.");
-            _this._stopCommand();
-            return typeof cb === "function" ? cb() : void 0;
+            return _this._checkSession(function(valid) {
+              if (valid) {
+                _this.is_leader = false;
+                debug("Did not get leader lock");
+                _this._stopCommand();
+                return typeof cb === "function" ? cb() : void 0;
+              } else {
+                return _this._startUp(function() {
+                  debug("Attempting election again with new session");
+                  return _this._attemptKeyAcquire(cb);
+                });
+              }
+            });
           }
         };
       })(this));
     };
 
-    ConsulElected.prototype._monitorKey = function() {
+    ConsulElected.prototype._monitorKey = function(knownLeader) {
       var opts;
+      if (knownLeader == null) {
+        knownLeader = false;
+      }
       if (this._monitoring) {
         return false;
       }
       debug("Starting key monitor request.");
       this._monitoring = true;
       opts = this._lastIndex ? {
-        wait: '10m',
+        wait: knownLeader ? '10m' : '30s',
         index: this._lastIndex
       } : null;
       return request.get({
@@ -193,7 +209,7 @@
           _this._monitoring = false;
           if (body && ((_ref = body[0]) != null ? _ref.Session : void 0)) {
             debug("Leader is " + (body[0].Session === _this.session ? "Me" : body[0].Session) + ". Polling again.");
-            _this._monitorKey();
+            _this._monitorKey(true);
             if (body[0].Session === _this.session) {
               if (!_this.process) {
                 debug("I am the leader, but I have no process. How so?");
@@ -267,6 +283,19 @@
       } else {
         return debug("Stop called with no process running?");
       }
+    };
+
+    ConsulElected.prototype._checkSession = function(cb) {
+      debug("Checking that our session is still valid");
+      return request.get({
+        url: "" + this.base_url + "/session/info/" + this.session,
+        json: true
+      }, (function(_this) {
+        return function(err, resp, body) {
+          debug("checkSession body is ", body);
+          return cb(body != null ? true : false);
+        };
+      })(this));
     };
 
     ConsulElected.prototype._createSession = function(cb) {

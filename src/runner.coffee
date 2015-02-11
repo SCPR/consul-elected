@@ -107,7 +107,7 @@ class ConsulElected extends require("events").EventEmitter
 
     #----------
 
-    _startUp: ->
+    _startUp: (cb) ->
         @_createSession (err,id) =>
             if err
                 console.error "Failed to create session: #{err}"
@@ -119,7 +119,7 @@ class ConsulElected extends require("events").EventEmitter
 
             return false if @_terminating
 
-            @_monitorKey()
+            if cb then cb() else @_monitorKey()
 
     #----------
 
@@ -140,18 +140,27 @@ class ConsulElected extends require("events").EventEmitter
                 @is_leader = true
                 debug "I am now the leader."
                 @_runCommand()
-                cb?()
+                cb()
 
             else
-                # We did not get the lock
-                @is_leader = false
-                debug "Did not get leader lock."
-                @_stopCommand()
-                cb?()
+                # before deciding that we're out of the running, check and
+                # make sure our session is still valid
+                @_checkSession (valid) =>
+                    if valid
+                        # ok, so we did just lose a valid election.
+                        @is_leader = false
+                        debug "Did not get leader lock"
+                        @_stopCommand()
+                        cb?()
+                    else
+                        # create a new session and try again
+                        @_startUp =>
+                            debug "Attempting election again with new session"
+                            @_attemptKeyAcquire cb
 
     #----------
 
-    _monitorKey: ->
+    _monitorKey: (knownLeader=false) ->
         if @_monitoring
             return false
 
@@ -163,7 +172,7 @@ class ConsulElected extends require("events").EventEmitter
 
         opts =
             if @_lastIndex
-                wait:   '10m'
+                wait:   if knownLeader then '10m' else '30s'
                 index:  @_lastIndex
             else
                 null
@@ -193,7 +202,7 @@ class ConsulElected extends require("events").EventEmitter
             if body && body[0]?.Session
                 # there is a leader... poll again
                 debug "Leader is #{ if body[0].Session == @session then "Me" else body[0].Session }. Polling again."
-                @_monitorKey()
+                @_monitorKey(true)
 
                 # if we're the leader, make sure our process is still healthy
                 if body[0].Session == @session
@@ -265,6 +274,19 @@ class ConsulElected extends require("events").EventEmitter
             @process.p.kill()
         else
             debug "Stop called with no process running?"
+
+    #----------
+
+    _checkSession: (cb) ->
+        debug "Checking that our session is still valid"
+        request.get
+            url:    "#{@base_url}/session/info/#{@session}"
+            json:   true
+        , (err,resp,body) =>
+            # body will be null if the session is invalid, or a JSON object
+            # if valid.
+            debug "checkSession body is ", body
+            cb if body? then true else false
 
     #----------
 
