@@ -113,6 +113,15 @@ class ConsulElected extends require("events").EventEmitter
                 console.error "Failed to create session: #{err}"
                 process.exit(1)
 
+            if !id
+                console.error "Failed to get a session ID. Sleeping 30s and trying again."
+                setTimeout =>
+                    debug "Refiring _startUp after timeout."
+                    @_startUp cb
+                , 30000
+
+                return false
+
             @session = id
 
             debug "Session ID is #{@session}"
@@ -227,36 +236,48 @@ class ConsulElected extends require("events").EventEmitter
     _runCommand: ->
         debug "Should start command: #{@command}"
 
-        if @process
-            # FIXME: this is to remove old process information, but should we make
-            # sure it's actually dead here? or put a bullet in it?
+        _start = =>
+            opts = {}
+            if args.cwd
+                opts.cwd = args.cwd
 
-            @process.p.removeAllListeners()
-            @process.p = null
+            cmd = @command.split(" ")
 
-            uptime = Number(new Date) - @process.start
-            debug "Command uptime was #{ Math.floor(uptime / 1000) } seconds."
+            @process = p:null, start:Number(new Date), stopping:false
+            @process.p = cp.spawn cmd[0], cmd[1..], opts
 
-        opts = {}
-        if args.cwd
-            opts.cwd = args.cwd
+            @process.p.stderr.pipe(process.stderr)
 
-        cmd = @command.split(" ")
+            @_updateTitle()
 
-        @process = p:null, start:Number(new Date), stopping:false
-        @process.p = cp.spawn cmd[0], cmd[1..], opts
+            @process.p.on "error", (err) =>
+                debug "Command got error: #{err}"
+                @_runCommand() if !@process.stopping
 
-        @process.p.stderr.pipe(process.stderr)
+            @process.p.on "exit", (code,signal) =>
+                debug "Command exited: #{code} || #{signal}"
+                @_runCommand() if !@process.stopping
 
-        @_updateTitle()
+        if !@process
+            _start()
+        else
+            # we expect the process to be shut down
+            try
+                # signal 0 tests whether process exists
+                process.kill worker.pid, 0
 
-        @process.p.on "error", (err) =>
-            debug "Command got error: #{err}"
-            @_runCommand() if !@process.stopping
+                # if we get here we've failed
+                debug "Tried to start command while it was already running."
+            catch e
+                # not running... start a new one
 
-        @process.p.on "exit", (code,signal) =>
-            debug "Command exited: #{code} || #{signal}"
-            @_runCommand() if !@process.stopping
+                @process.p.removeAllListeners()
+                @process.p = null
+
+                uptime = Number(new Date) - @process.start
+                debug "Command uptime was #{ Math.floor(uptime / 1000) } seconds."
+
+                _start()
 
     #----------
 

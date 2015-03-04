@@ -113,6 +113,14 @@
             console.error("Failed to create session: " + err);
             process.exit(1);
           }
+          if (!id) {
+            console.error("Failed to get a session ID. Sleeping 30s and trying again.");
+            setTimeout(function() {
+              debug("Refiring _startUp after timeout.");
+              return _this._startUp(cb);
+            }, 30000);
+            return false;
+          }
           _this.session = id;
           debug("Session ID is " + _this.session);
           if (_this._terminating) {
@@ -229,43 +237,53 @@
     };
 
     ConsulElected.prototype._runCommand = function() {
-      var cmd, opts, uptime;
+      var e, uptime, _start;
       debug("Should start command: " + this.command);
-      if (this.process) {
-        this.process.p.removeAllListeners();
-        this.process.p = null;
-        uptime = Number(new Date) - this.process.start;
-        debug("Command uptime was " + (Math.floor(uptime / 1000)) + " seconds.");
-      }
-      opts = {};
-      if (args.cwd) {
-        opts.cwd = args.cwd;
-      }
-      cmd = this.command.split(" ");
-      this.process = {
-        p: null,
-        start: Number(new Date),
-        stopping: false
-      };
-      this.process.p = cp.spawn(cmd[0], cmd.slice(1), opts);
-      this.process.p.stderr.pipe(process.stderr);
-      this._updateTitle();
-      this.process.p.on("error", (function(_this) {
-        return function(err) {
-          debug("Command got error: " + err);
-          if (!_this.process.stopping) {
-            return _this._runCommand();
+      _start = (function(_this) {
+        return function() {
+          var cmd, opts;
+          opts = {};
+          if (args.cwd) {
+            opts.cwd = args.cwd;
           }
+          cmd = _this.command.split(" ");
+          _this.process = {
+            p: null,
+            start: Number(new Date),
+            stopping: false
+          };
+          _this.process.p = cp.spawn(cmd[0], cmd.slice(1), opts);
+          _this.process.p.stderr.pipe(process.stderr);
+          _this._updateTitle();
+          _this.process.p.on("error", function(err) {
+            debug("Command got error: " + err);
+            if (!_this.process.stopping) {
+              return _this._runCommand();
+            }
+          });
+          return _this.process.p.on("exit", function(code, signal) {
+            debug("Command exited: " + code + " || " + signal);
+            if (!_this.process.stopping) {
+              return _this._runCommand();
+            }
+          });
         };
-      })(this));
-      return this.process.p.on("exit", (function(_this) {
-        return function(code, signal) {
-          debug("Command exited: " + code + " || " + signal);
-          if (!_this.process.stopping) {
-            return _this._runCommand();
-          }
-        };
-      })(this));
+      })(this);
+      if (!this.process) {
+        return _start();
+      } else {
+        try {
+          process.kill(worker.pid, 0);
+          return debug("Tried to start command while it was already running.");
+        } catch (_error) {
+          e = _error;
+          this.process.p.removeAllListeners();
+          this.process.p = null;
+          uptime = Number(new Date) - this.process.start;
+          debug("Command uptime was " + (Math.floor(uptime / 1000)) + " seconds.");
+          return _start();
+        }
+      }
     };
 
     ConsulElected.prototype._stopCommand = function() {
